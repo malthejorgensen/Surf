@@ -8,12 +8,13 @@ import Control.Applicative -- for <|>
 
 port = 8000
 
-main = (print $ "Started listening on port " ++ show port)
-     >> listenOn (PortNumber port)
-     >>= accept
-     >>= \(handle, hostname, portnumber) -> hGetContents handle
-     >>= print
-     -- >> sClose (PortNumber port)
+main = do
+  print $ "Started listening on port " ++ show port
+  sock <- listenOn (PortNumber port)
+  (handle, hostname, portnumber) <- accept sock
+  text <- hGetContents handle
+  print text
+  sClose sock
 
 
 
