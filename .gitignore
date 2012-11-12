@@ -1,0 +1,6 @@
+*.o
+*.hi
+myVimLog
+*.webloc
+Setup.hs
+dist
