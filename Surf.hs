@@ -25,7 +25,7 @@ main = do
   -- installHandler sigTERM (Catch (throwTo tid UserInterrupt)) Nothing
   -- installHandler sigINT Ignore Nothing -- ignore Ctrl-C
 
-  print $ "Started listening on port " ++ show port
+  putStrLn $ "Started listening on port " ++ show port
   sock <- N.listenOn (PortNumber port)
   acceptConn sock `E.catch` interrupt sock
   where interrupt sock exception =
@@ -36,7 +36,7 @@ main = do
 
 acceptConn sock = do
   (handle, hostname, portnumber) <- accept sock
-  -- print hostname ++ " " ++ portnumber
+  putStrLn $ "Got connection from " ++ hostname ++ ":" ++ show portnumber
   text <- BS.hGetLine handle
   print text
   sClose sock
