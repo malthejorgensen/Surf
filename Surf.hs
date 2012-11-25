@@ -1,14 +1,16 @@
-import System.IO as IO
-import Network as N
-{-import GHC.IO.Handle-}
-import Data.ByteString as BS hiding (putStrLn, hPutStrLn) -- for hGetContents
-import qualified Data.ByteString.Char8 as C-- for pack
+import qualified System.IO as IO
+import qualified Network as N
+{-import qualified GHC.IO.Handle-}
+
+import qualified Data.ByteString as BS hiding (putStrLn, hPutStrLn) -- for hGetContents
+import qualified Data.ByteString.Char8 as C -- for pack
+
 import Data.Attoparsec.ByteString
 import Control.Applicative -- for <|>
-{-import qualified Data.ByteString as B-}
-import Control.Exception as E
-import Control.Concurrent
-import System.Posix.Signals
+
+import qualified Control.Exception as E
+import qualified Control.Concurrent as Con
+import qualified System.Posix.Signals
 
 port = 8000
 
@@ -17,29 +19,43 @@ port = 8000
 -- "Connection: Keep-Alive" is the default so we cannot use `hGetContents` as 
 -- it will block.
 
-
-main = do
-  tid <- myThreadId
+-- `withSocketsDo` is for portability with Windows (not really required)
+main = N.withSocketsDo $ do
+  tid <- Con.myThreadId
   -- installHandler keyboardSignal (Catch (throwTo tid UserInterrupt)) Nothing
   -- installHandler sigINT (Catch (throwTo tid UserInterrupt)) Nothing
   -- installHandler sigTERM (Catch (throwTo tid UserInterrupt)) Nothing
   -- installHandler sigINT Ignore Nothing -- ignore Ctrl-C
 
   putStrLn $ "Started listening on port " ++ show port
-  sock <- N.listenOn (PortNumber port)
+  sock <- N.listenOn (N.PortNumber port)
   acceptConn sock `E.catch` interrupt sock
   where interrupt sock exception =
-          let err = show (exception :: SomeException) in do
+          let err = show (exception :: E.SomeException) in do
             putStrLn "Closing socket."
-            hPutStrLn stderr $ "Some exception caught: " ++ err
-            sClose sock
+            IO.hPutStrLn IO.stderr $ "Some exception caught: " ++ err
+            N.sClose sock
 
 acceptConn sock = do
-  (handle, hostname, portnumber) <- accept sock
+  (handle, hostname, portnumber) <- N.accept sock
   putStrLn $ "Got connection from " ++ hostname ++ ":" ++ show portnumber
   text <- BS.hGetLine handle
   print text
-  sClose sock
+  C.hPutStr handle $ C.pack $ unlines ["HTTP/1.0 200 OK",
+                             "Date: Fri, 31 Dec 1999 23:59:59 GMT",
+                             "Content-Type: text/html",
+                             "Content-Length: 1354",
+                             "",
+                             "<html>",
+                             "<body>",
+                             "<h1>Happy New Millennium!</h1>",
+                             "(more file contents)",
+                             "  .",
+                             "  .",
+                             "  .",
+                             "</body>",
+                             "</html>"]
+  N.sClose sock
 
 
 
