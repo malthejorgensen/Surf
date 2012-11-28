@@ -76,12 +76,6 @@ acceptConn sock = do
   N.sClose sock
 
 
-peekToFail :: Char -> Parser (Result [a])
-peekToFail cExpected = do
-  c <- peekChar
-  if c == (Just cExpected) || c == Nothing then fail "hehe" -- `mzero` also works
-  else return $ Done "" []
-
 -- httpRequestParser :: Parser BS.ByteString
 httpRequestParser = do
   action <- string "GET" <|> string "POST"
@@ -92,13 +86,13 @@ httpRequestParser = do
   httpVersion <- rational
   Debug.traceShow httpVersion (return "")
   char '\r'
-  options <- many (do
-                     peekToFail '\r' -- Die if line starts with \r
+  options <- manyTill (do
                      optionName <- takeWhile1 (/= ':')
                      string ": "
                      optionValue <- takeWhile1 (/= '\r')
                      char '\r'
                      return (optionName, optionValue))
+                      (char '\r')
   Debug.traceShow options (return "")
   return (action, url)
 
