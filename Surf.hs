@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 import qualified System.IO as IO
 import qualified Network as N
-import qualified Network.Socket as S
 {-import qualified GHC.IO.Handle-}
 
 import qualified Data.ByteString as BS hiding (putStrLn, hPutStrLn) -- for hGetContents
@@ -59,7 +58,7 @@ main = N.withSocketsDo $ do
 
 mediateSwitch = False
 local_hostname = "127.0.0.1"
-local_port = "9000"
+local_port = 9000
 
 takeWhile' :: (t -> Bool) -> [IO t] -> IO [t]
 takeWhile' test (a:as) = do
@@ -73,42 +72,30 @@ takeWhile' test (a:as) = do
 
 mediate' = mediate IO.stdin
 mediate handle = do
-    -- Lookup hostname and port
-    addrinfos <- S.getAddrInfo Nothing (Just local_hostname) (Just local_port)
-    let serveraddr = head addrinfos
-    print serveraddr
 
     -- Establish a socket for communication
-    mediate_sock <- S.socket (S.addrFamily serveraddr) S.Stream S.defaultProtocol
-    S.connect mediate_sock (S.addrAddress serveraddr)
-    -- S.send mediate_sock "GET / HTTP/1.1\r\r"
-    is_connected <- S.sIsConnected mediate_sock
-    if is_connected then do
-      mediate_handle <- S.socketToHandle mediate_sock IO.ReadWriteMode
-      IO.hSetBuffering mediate_handle IO.NoBuffering
-      -- IO.hSetBuffering mediate_handle IO.LineBuffering
+    mediate_handle <- N.connectTo local_hostname (N.PortNumber local_port)
+    IO.hSetBuffering mediate_handle IO.NoBuffering
+    -- IO.hSetBuffering mediate_handle IO.LineBuffering
 
-      -- Send request
-      print "Sending browser request"
-      req_line_actions <- return $ repeat $ debugGetLine handle
-      req_lines <- takeWhile' (/="\r") $ req_line_actions
-      C.hPutStr mediate_handle $ C.unlines $ req_lines ++ ["\r"]
+    -- Send request
+    print "Sending browser request"
+    req_line_actions <- return $ repeat $ debugGetLine handle
+    req_lines <- takeWhile' (/="\r") $ req_line_actions
+    C.hPutStr mediate_handle $ C.unlines $ req_lines ++ ["\r"]
 
-      -- Get answer
-      print "Fetching server answer"
-      -- answer <- C.hGetContents mediate_handle
-      -- print answer
+    -- Get answer
+    print "Fetching server answer"
+    -- answer <- C.hGetContents mediate_handle
+    -- print answer
 
-      -- C.hPutStrLn handle
-      -- ans_line_actions <- return $ repeat $ debugGetLine mediate_handle
-      -- ans_lines <- takeWhile' (/="\r") $ ans_line_actions
-      -- C.hPutStrLn handle $ C.unlines ans_lines
-      C.hGetContents mediate_handle >>= C.hPutStrLn handle
+    -- C.hPutStrLn handle
+    -- ans_line_actions <- return $ repeat $ debugGetLine mediate_handle
+    -- ans_lines <- takeWhile' (/="\r") $ ans_line_actions
+    -- C.hPutStrLn handle $ C.unlines ans_lines
+    C.hGetContents mediate_handle >>= C.hPutStrLn handle
 
-      IO.hClose mediate_handle
-    else do
-      print $ "Connection to " ++ local_hostname ++ ":" ++ local_port ++ " failed."
-      S.sClose mediate_sock
+    IO.hClose mediate_handle
 
 
 acceptConn handle = do
