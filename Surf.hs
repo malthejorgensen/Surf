@@ -35,6 +35,8 @@ debugGetLine handle = C.hGetLine handle
 -- "Connection: Keep-Alive" is the default so we cannot use `hGetContents` as 
 -- it will block.
 
+-- http://stackoverflow.com/questions/8042286/haskell-how-to-use-forkio-to-enable-multiple-clients-to-connect-to-a-server
+
 -- `withSocketsDo` is for portability with Windows (not really required)
 main = N.withSocketsDo $ do
   tid <- Con.myThreadId
@@ -45,7 +47,10 @@ main = N.withSocketsDo $ do
 
   putStrLn $ "Started listening on port " ++ show port
   sock <- N.listenOn (N.PortNumber port)
-  forever $ acceptConn sock `E.catch` interrupt sock
+  forever $ do 
+    (handle, hostname, portnumber) <- N.accept sock
+    putStrLn $ "Got connection from " ++ hostname ++ ":" ++ show portnumber
+    Con.forkIO $ acceptConn handle `E.catch` interrupt sock
   where interrupt sock exception =
           let err = show (exception :: E.SomeException) in do
             IO.hPutStrLn IO.stderr $ "Some exception caught: " ++ err
@@ -106,10 +111,7 @@ mediate handle = do
       S.sClose mediate_sock
 
 
-acceptConn sock = do
-  (handle, hostname, portnumber) <- N.accept sock
-  putStrLn $ "Got connection from " ++ hostname ++ ":" ++ show portnumber
-
+acceptConn handle = do
 
   if mediateSwitch then
     mediate handle
@@ -134,6 +136,7 @@ acceptConn sock = do
       (C.hPutStr handle =<< C.hGetContents file)
       -- C.hPutStr handle $ readFile $ tail url
       )
+    IO.hClose handle
 
   -- N.sClose sock
 
