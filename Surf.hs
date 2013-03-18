@@ -45,7 +45,7 @@ main = N.withSocketsDo $ do
 
   putStrLn $ "Started listening on port " ++ show port
   sock <- N.listenOn (N.PortNumber port)
-  acceptConn sock `E.catch` interrupt sock
+  forever $ acceptConn sock `E.catch` interrupt sock
   where interrupt sock exception =
           let err = show (exception :: E.SomeException) in do
             IO.hPutStrLn IO.stderr $ "Some exception caught: " ++ err
@@ -135,7 +135,7 @@ acceptConn sock = do
       -- C.hPutStr handle $ readFile $ tail url
       )
 
-  N.sClose sock
+  -- N.sClose sock
 
 
 -- httpRequestParser :: Parser BS.ByteString
