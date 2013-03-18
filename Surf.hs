@@ -47,8 +47,8 @@ main = N.withSocketsDo $ do
   acceptConn sock `E.catch` interrupt sock
   where interrupt sock exception =
           let err = show (exception :: E.SomeException) in do
-            putStrLn "Closing socket."
             IO.hPutStrLn IO.stderr $ "Some exception caught: " ++ err
+            putStrLn "Closing socket."
             N.sClose sock
 
 acceptConn sock = do
