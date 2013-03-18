@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 import qualified System.IO as IO
 import qualified Network as N
+import qualified Network.Socket as S
 {-import qualified GHC.IO.Handle-}
 
 import qualified Data.ByteString as BS hiding (putStrLn, hPutStrLn) -- for hGetContents
@@ -51,27 +52,88 @@ main = N.withSocketsDo $ do
             putStrLn "Closing socket."
             N.sClose sock
 
+mediateSwitch = False
+local_hostname = "127.0.0.1"
+local_port = "9000"
+
+takeWhile' :: (t -> Bool) -> [IO t] -> IO [t]
+takeWhile' test (a:as) = do
+  x <- a
+  -- return [x]
+  if test x then do
+    xs <- (takeWhile' test as)
+    return (x:xs)
+  else
+    return []
+
+mediate' = mediate IO.stdin
+mediate handle = do
+    -- Lookup hostname and port
+    addrinfos <- S.getAddrInfo Nothing (Just local_hostname) (Just local_port)
+    let serveraddr = head addrinfos
+    print serveraddr
+
+    -- Establish a socket for communication
+    mediate_sock <- S.socket (S.addrFamily serveraddr) S.Stream S.defaultProtocol
+    S.connect mediate_sock (S.addrAddress serveraddr)
+    -- S.send mediate_sock "GET / HTTP/1.1\r\r"
+    is_connected <- S.sIsConnected mediate_sock
+    if is_connected then do
+      mediate_handle <- S.socketToHandle mediate_sock IO.ReadWriteMode
+      IO.hSetBuffering mediate_handle IO.NoBuffering
+      -- IO.hSetBuffering mediate_handle IO.LineBuffering
+
+      -- Send request
+      print "Sending browser request"
+      req_line_actions <- return $ repeat $ debugGetLine handle
+      req_lines <- takeWhile' (/="\r") $ req_line_actions
+      C.hPutStr mediate_handle $ C.unlines $ req_lines ++ ["\r"]
+
+      -- Get answer
+      print "Fetching server answer"
+      -- answer <- C.hGetContents mediate_handle
+      -- print answer
+
+      -- C.hPutStrLn handle
+      -- ans_line_actions <- return $ repeat $ debugGetLine mediate_handle
+      -- ans_lines <- takeWhile' (/="\r") $ ans_line_actions
+      -- C.hPutStrLn handle $ C.unlines ans_lines
+      C.hGetContents mediate_handle >>= C.hPutStrLn handle
+
+      IO.hClose mediate_handle
+    else do
+      print $ "Connection to " ++ local_hostname ++ ":" ++ local_port ++ " failed."
+      S.sClose mediate_sock
+
+
 acceptConn sock = do
   (handle, hostname, portnumber) <- N.accept sock
   putStrLn $ "Got connection from " ++ hostname ++ ":" ++ show portnumber
-  text <- debugGetLine handle
-  Done unparsed_text (action, url) <- parseWith (debugGetLine handle) httpRequestParser text
 
-  filepath <- if url == "/" then return "index.html" else return $ C.tail url
 
-  IO.withFile (C.unpack filepath) IO.ReadMode (\file -> do
-    filesize <- IO.hFileSize file
+  if mediateSwitch then
+    mediate handle
+  else do
+    -- initiate the parser with at least one line of input
+    text <- debugGetLine handle
+    -- parse and let the parser get more input with `debugGetLine`
+    Done unparsed_text (action, url) <- parseWith (debugGetLine handle) httpRequestParser text
 
-    C.hPutStr handle $ C.unlines ["HTTP/1.0 200 OK",
-                                "Date: Fri, 31 Dec 1999 23:59:59 GMT",
-                                "Content-Type: text/html",
-    -- hFileSize is slow?
-    -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
-                                C.append "Content-Length: " (C.pack$show$filesize),
-                                ""]
-    (C.hPutStr handle =<< C.hGetContents file)
-    -- C.hPutStr handle $ readFile $ tail url
-    )
+    filepath <- if url == "/" then return "index.html" else return $ C.tail url
+
+    IO.withFile (C.unpack filepath) IO.ReadMode (\file -> do
+      filesize <- IO.hFileSize file
+      -- hFileSize is slow?
+      -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
+
+      C.hPutStr handle $ C.unlines ["HTTP/1.0 200 OK",
+                                  "Date: Fri, 31 Dec 1999 23:59:59 GMT",
+                                  "Content-Type: text/html",
+                                  C.append "Content-Length: " (C.pack$show$filesize),
+                                  ""]
+      (C.hPutStr handle =<< C.hGetContents file)
+      -- C.hPutStr handle $ readFile $ tail url
+      )
 
   N.sClose sock
 
