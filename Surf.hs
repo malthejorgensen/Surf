@@ -18,7 +18,7 @@ import qualified Control.Concurrent as Con
 import qualified System.Posix.Signals
 import qualified Debug.Trace as Debug
 
-port = 8000
+port = 80
 
 testString :: C.ByteString
 testString = "Let the sky fall"
@@ -51,12 +51,17 @@ main = N.withSocketsDo $ do
   forever $ do 
     (handle, hostname, portnumber) <- N.accept sock
     putStrLn $ "Got connection from " ++ hostname ++ ":" ++ show portnumber
-    Con.forkIO $ acceptConn handle `E.catch` interrupt sock
-  where interrupt sock exception =
+    IO.withFile "http.log" IO.AppendMode (\file -> do
+      IO.hPutStrLn file $ "Got connection from " ++ hostname ++ ":" ++ show portnumber
+      )
+    Con.forkIO $ acceptConn handle `E.catch` interrupt sock handle
+  where interrupt sock handle exception =
           let err = show (exception :: E.SomeException) in do
             IO.hPutStrLn IO.stderr $ "Some exception caught: " ++ err
             putStrLn "Closing socket."
+            IO.hClose handle
             N.sClose sock
+            main
 
 mediateSwitch = False
 local_hostname = "127.0.0.1"
@@ -117,36 +122,43 @@ acceptConn handle = do
       IO.withFile "http.log" IO.AppendMode (\file -> do
           C.hPutStrLn file request
           )
-      let (action, url) = case parse httpRequestParser request of
-             Fail unparsed_text l_str str     -> error str
-             Partial f                        -> error "supply more text"
-             Done unparsed_text (action, url) -> (action, url)
-
- 
-      filepath <- if url == "/" then return "index.html" else return $ C.tail url
-
-      fExists <- Folder.doesFileExist (C.unpack filepath)
-      if fExists
-        then IO.withFile (C.unpack filepath) IO.ReadMode (\file -> do
-          filesize <- IO.hFileSize file
-          -- hFileSize is slow?
-          -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
-
-          C.hPutStr handle $ C.unlines ["HTTP/1.0 200 OK",
-                                      "Date: Fri, 31 Dec 1999 23:59:59 GMT",
-                                      "Content-Type: text/html",
-                                      C.append "Content-Length: " (C.pack$show$filesize),
-                                      ""]
-          (C.hPutStr handle =<< C.hGetContents file)
-          -- C.hPutStr handle $ readFile $ tail url
-          )
-         else C.hPutStr handle $ C.unlines ["HTTP/1.0 404 Not Found",
-                                            "Date: Fri, 31 Dec 1999 23:59:59 GMT",
-                                            ""]
-                                    -- "Content-Type: text/html",
-                                    -- C.append "Content-Length: " (C.pack$show$filesize),
-                                    -- ""]
+      _ <- case parse httpRequestParser request of
+             Fail unparsed_text l_str str     -> return $ badRequest handle
+             Partial f                        -> return $ badRequest handle
+             Done unparsed_text (action, url) -> return $ goodRequest handle (action, url)
       IO.hClose handle
+
+goodRequest handle (action, url) = do
+  filepath <- if url == "/" then return "index.html" else return $ C.tail url
+
+  fExists <- Folder.doesFileExist (C.unpack filepath)
+  if fExists
+    then IO.withFile (C.unpack filepath) IO.ReadMode (\file -> do
+      filesize <- IO.hFileSize file
+      -- hFileSize is slow?
+      -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
+
+      C.hPutStr handle $ C.unlines ["HTTP/1.0 200 OK",
+                                  "Date: Fri, 31 Dec 1999 23:59:59 GMT",
+                                  "Content-Type: text/html",
+                                  C.append "Content-Length: " (C.pack$show$filesize),
+                                  ""]
+      (C.hPutStr handle =<< C.hGetContents file)
+      -- C.hPutStr handle $ readFile $ tail url
+      )
+     else notFound handle
+
+badRequest handle =
+  C.hPutStr handle $ C.unlines ["HTTP/1.0 400 Bad Request",
+                                "Date: Fri, 31 Dec 1999 23:59:59 GMT",
+                                ""]
+notFound handle =
+  C.hPutStr handle $ C.unlines ["HTTP/1.0 404 Not Found",
+                                "Date: Fri, 31 Dec 1999 23:59:59 GMT",
+                                ""]
+                                -- "Content-Type: text/html",
+                                -- C.append "Content-Length: " (C.pack$show$filesize),
+                                -- ""]
 
   -- N.sClose sock
 
@@ -159,7 +171,7 @@ httpRequestParser = do
   space
   string "HTTP/"
   httpVersion <- rational
-  Debug.traceShow httpVersion (return "")
+  --Debug.traceShow httpVersion (return "")
   char '\r'
   options <- manyTill (do
                      optionName <- takeWhile1 (/= ':')
@@ -168,7 +180,7 @@ httpRequestParser = do
                      char '\r'
                      return (optionName, optionValue))
                       (char '\r')
-  Debug.traceShow options (return "")
+  --Debug.traceShow options (return "")
   return (action, url)
 
 
