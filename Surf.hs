@@ -63,13 +63,14 @@ local_port = 9000
 takeWhile' :: (t -> Bool) -> [IO t] -> IO [t]
 takeWhile' test (a:as) = do
   x <- a
-  -- return [x]
   if test x 
-    then do return [x]
+    then do xs <- (takeWhile' test as)
+            return (x:xs)
     else do return []
 
 mediate' = mediate IO.stdin
 mediate handle = do
+
 
     -- Establish a socket for communication
     mediate_handle <- N.connectTo local_hostname (N.PortNumber local_port)
