@@ -11,6 +11,8 @@ import Data.Attoparsec.ByteString.Char8 as AP
 import Control.Applicative -- for <|>
 import Control.Monad -- for mzero
 
+import qualified System.Directory as Folder -- for doesFileExist
+
 import qualified Control.Exception as E
 import qualified Control.Concurrent as Con
 import qualified System.Posix.Signals
@@ -108,20 +110,28 @@ acceptConn handle = do
       Done unparsed_text (action, url) <- parseWith (debugGetLine handle) httpRequestParser text
    
       filepath <- if url == "/" then return "index.html" else return $ C.tail url
-   
-      IO.withFile (C.unpack filepath) IO.ReadMode (\file -> do
-        filesize <- IO.hFileSize file
-        -- hFileSize is slow?
-        -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
-   
-        C.hPutStr handle $ C.unlines ["HTTP/1.0 200 OK",
-                                    "Date: Fri, 31 Dec 1999 23:59:59 GMT",
-                                    "Content-Type: text/html",
-                                    C.append "Content-Length: " (C.pack$show$filesize),
-                                    ""]
-        (C.hPutStr handle =<< C.hGetContents file)
-        -- C.hPutStr handle $ readFile $ tail url
-        )
+
+      fExists <- Folder.doesFileExist (C.unpack filepath)
+      if fExists
+        then IO.withFile (C.unpack filepath) IO.ReadMode (\file -> do
+          filesize <- IO.hFileSize file
+          -- hFileSize is slow?
+          -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
+
+          C.hPutStr handle $ C.unlines ["HTTP/1.0 200 OK",
+                                      "Date: Fri, 31 Dec 1999 23:59:59 GMT",
+                                      "Content-Type: text/html",
+                                      C.append "Content-Length: " (C.pack$show$filesize),
+                                      ""]
+          (C.hPutStr handle =<< C.hGetContents file)
+          -- C.hPutStr handle $ readFile $ tail url
+          )
+         else C.hPutStr handle $ C.unlines ["HTTP/1.0 404 Not Found",
+                                            "Date: Fri, 31 Dec 1999 23:59:59 GMT",
+                                            ""]
+                                    -- "Content-Type: text/html",
+                                    -- C.append "Content-Length: " (C.pack$show$filesize),
+                                    -- ""]
       IO.hClose handle
 
   -- N.sClose sock
