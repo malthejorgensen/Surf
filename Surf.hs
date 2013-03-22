@@ -123,9 +123,9 @@ acceptConn handle = do
           C.hPutStrLn file request
           )
       _ <- case parse httpRequestParser request of
-             Fail unparsed_text l_str str     -> return $ badRequest handle
-             Partial f                        -> return $ badRequest handle
-             Done unparsed_text (action, url) -> return $ goodRequest handle (action, url)
+             Fail unparsed_text l_str str     -> badRequest handle
+             Partial f                        -> badRequest handle
+             Done unparsed_text (action, url) -> goodRequest handle (action, url)
       IO.hClose handle
 
 goodRequest handle (action, url) = do
