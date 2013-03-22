@@ -105,10 +105,24 @@ acceptConn handle = do
     then mediate handle
     else do
       -- initiate the parser with at least one line of input
-      text <- debugGetLine handle
+      -- text <- debugGetLine handle
       -- parse and let the parser get more input with `debugGetLine`
-      Done unparsed_text (action, url) <- parseWith (debugGetLine handle) httpRequestParser text
-   
+      -- Done unparsed_text (action, url) <- parseWith (debugGetLine handle) httpRequestParser text
+      -- IO.withFile "http.log" IO.AppendMode (\file -> do
+      --     C.hPutStr file unparsed_text
+      --     )
+      request_line_actions <- return $ repeat $ debugGetLine handle
+      request_lines <- takeWhile' (/="\r") $ request_line_actions
+      let request = C.concat $ request_lines ++ ["\r"]
+      IO.withFile "http.log" IO.AppendMode (\file -> do
+          C.hPutStrLn file request
+          )
+      let (action, url) = case parse httpRequestParser request of
+             Fail unparsed_text l_str str     -> error str
+             Partial f                        -> error "supply more text"
+             Done unparsed_text (action, url) -> (action, url)
+
+ 
       filepath <- if url == "/" then return "index.html" else return $ C.tail url
 
       fExists <- Folder.doesFileExist (C.unpack filepath)
