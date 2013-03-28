@@ -48,20 +48,28 @@ main = N.withSocketsDo $ do
 
   putStrLn $ "Started listening on port " ++ show port
   sock <- N.listenOn (N.PortNumber port)
-  forever $ do 
-    (handle, hostname, portnumber) <- N.accept sock
-    putStrLn $ "Got connection from " ++ hostname ++ ":" ++ show portnumber
-    IO.withFile "http.log" IO.AppendMode (\file -> do
-      IO.hPutStrLn file $ "Got connection from " ++ hostname ++ ":" ++ show portnumber
-      )
-    Con.forkIO $ acceptConn handle `E.catch` interrupt sock handle
-  where interrupt sock handle exception =
-          let err = show (exception :: E.SomeException) in do
-            IO.hPutStrLn IO.stderr $ "Some exception caught: " ++ err
-            putStrLn "Closing socket."
-            IO.hClose handle
-            N.sClose sock
-            main
+  acceptConnections sock
+  -- forever $ do 
+  --   (handle, hostname, portnumber) <- N.accept sock
+  --   putStrLn $ "Got connection from " ++ hostname ++ ":" ++ show portnumber
+  --   IO.withFile "http.log" IO.AppendMode (\file -> do
+  --     IO.hPutStrLn file $ "Got connection from " ++ hostname ++ ":" ++ show portnumber
+  --     )
+  --   Con.forkIO $ acceptConn handle `E.catch` interrupt sock handle
+  -- where interrupt sock handle exception =
+  --         let err = show (exception :: E.SomeException) in do
+  --           IO.hPutStrLn IO.stderr $ "Some exception caught: " ++ err
+  --           putStrLn "Closing socket."
+  --           N.sClose sock
+
+
+acceptConnections sock = do
+  putStrLn "trying to accept" -- debug msg
+  conn@(handle,host,port) <- N.accept sock
+  print conn -- debug msg
+  Con.forkIO $ catch (acceptConn handle `E.finally` IO.hClose handle) (\e -> print e)
+  acceptConnections sock
+
 
 mediateSwitch = False
 local_hostname = "127.0.0.1"
@@ -148,11 +156,11 @@ goodRequest handle (action, url) = do
       )
      else notFound handle
 
-badRequest handle =
+badRequest handle = do
   C.hPutStr handle $ C.unlines ["HTTP/1.0 400 Bad Request",
                                 "Date: Fri, 31 Dec 1999 23:59:59 GMT",
                                 ""]
-notFound handle =
+notFound handle = do
   C.hPutStr handle $ C.unlines ["HTTP/1.0 404 Not Found",
                                 "Date: Fri, 31 Dec 1999 23:59:59 GMT",
                                 ""]
