@@ -125,8 +125,9 @@ acceptConn handle = do
       --     C.hPutStr file unparsed_text
       --     )
       request_line_actions <- return $ repeat $ debugGetLine handle
-      request_lines <- takeWhile' (/="\r") $ request_line_actions
-      let request = C.concat $ request_lines ++ ["\r"]
+      request_lines <- takeWhile' (\c-> c/="\r" && c/="") $ request_line_actions
+      let end = if last (C.unpack$head request_lines) == '\r' then "\r" else ""
+      let request = C.concat $ map (\l -> C.concat [l, "\n"]) $ request_lines ++ [end]
       IO.withFile "http.log" IO.AppendMode (\file -> do
           C.hPutStrLn file request
           )
@@ -180,14 +181,14 @@ httpRequestParser = do
   string "HTTP/"
   httpVersion <- rational
   --Debug.traceShow httpVersion (return "")
-  char '\r'
+  string "\n" <|> string "\r\n"
   options <- manyTill (do
                      optionName <- takeWhile1 (/= ':')
                      string ": "
-                     optionValue <- takeWhile1 (/= '\r')
-                     char '\r'
+                     optionValue <- takeWhile1 (\c -> c /= '\n' && c /= '\r')
+                     string "\n" <|> string "\r\n"
                      return (optionName, optionValue))
-                      (char '\r')
+                      (string "\n" <|> string "\r\n")
   --Debug.traceShow options (return "")
   return (action, url)
 
