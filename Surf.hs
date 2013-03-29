@@ -25,7 +25,7 @@ import qualified Control.Concurrent as Con
 import qualified System.Posix.Signals
 import qualified Debug.Trace as Debug
 
-port = 80
+data Settings = Settings { port :: N.PortNumber, domainRoot :: C.ByteString }
 
 testString :: C.ByteString
 testString = "Let the sky fall"
@@ -52,19 +52,21 @@ main = N.withSocketsDo $ do
   -- installHandler sigINT (Catch (throwTo tid UserInterrupt)) Nothing
   -- installHandler sigTERM (Catch (throwTo tid UserInterrupt)) Nothing
   -- installHandler sigINT Ignore Nothing -- ignore Ctrl-C
-  eitherPort <- Error.runErrorT $
+  eitherSettings <- Error.runErrorT $
     do
       cp <- join $ Error.liftIO $ CF.readfile CF.emptyCP "conf.ini"
       p <- (CF.get cp "Server" "port") :: Error.MonadError CF.CPError m => m Int
+      d <- (CF.get cp "Server" "domain-root")
       Error.liftIO $ putStrLn (show p)
-      return p
+      Error.liftIO $ putStrLn d
+      return Settings { port = (fromIntegral p), domainRoot = (C.pack d) }
 
-  case eitherPort of
-    Either.Left err -> error "Failed parsing conf.ini"
-    Either.Right port -> do
-      putStrLn $ "Started listening on port " ++ show port
-      sock <- N.listenOn (N.PortNumber (fromIntegral port))
-      acceptConnections sock
+  case eitherSettings of
+    Either.Left err -> error $ "Failed parsing conf.ini: " ++ show err
+    Either.Right settings -> do
+      putStrLn $ "Started listening on port " ++ show (port settings)
+      sock <- N.listenOn (N.PortNumber (port settings))
+      acceptConnections sock settings
   -- forever $ do 
   --   (handle, hostname, portnumber) <- N.accept sock
   --   putStrLn $ "Got connection from " ++ hostname ++ ":" ++ show portnumber
@@ -79,12 +81,12 @@ main = N.withSocketsDo $ do
   --           N.sClose sock
 
 
-acceptConnections sock = do
+acceptConnections sock settings = do
   putStrLn "trying to accept" -- debug msg
   conn@(handle,host,port) <- N.accept sock
   print conn -- debug msg
-  Con.forkIO $ catch (acceptConn handle `E.finally` IO.hClose handle) (\e -> print e)
-  acceptConnections sock
+  Con.forkIO $ catch (acceptConn handle settings `E.finally` IO.hClose handle) (\e -> print e)
+  acceptConnections sock settings
 
 
 mediateSwitch = False
@@ -128,7 +130,7 @@ mediate handle = do
     IO.hClose mediate_handle
 
 
-acceptConn handle = do
+acceptConn handle settings = do
 
   if mediateSwitch
     then mediate handle
@@ -150,11 +152,22 @@ acceptConn handle = do
       _ <- case parse httpRequestParser request of
              Fail unparsed_text l_str str     -> badRequest handle
              Partial f                        -> badRequest handle
-             Done unparsed_text (action, url) -> goodRequest handle (action, url)
+             Done unparsed_text (action, url, headers) -> goodRequest handle (action, url, headers) settings
       IO.hClose handle
 
-goodRequest handle (action, url) = do
-  filepath <- if url == "/" then return "index.html" else return $ C.tail url
+goodRequest handle (action, url, headers) settings = do
+  let base_filepath = if url == "/" then "index.html" else C.tail url
+  -- Get "Host" header
+  let host = case Map.lookup "Host" (Map.fromList headers) of
+               -- Remove any port part
+               Just hostWithPort -> C.takeWhile (/= ':') hostWithPort
+               Nothing -> ""
+  -- Print "Host: ..."
+  C.putStrLn $ C.append "Host: " host
+
+  let filepath = C.concat [(domainRoot settings), host, "/", base_filepath]
+
+  C.putStrLn $ C.append "Grabbing file: " filepath
 
   fExists <- Folder.doesFileExist (C.unpack filepath)
   if fExists
@@ -220,7 +233,7 @@ httpRequestParser = do
                      return (optionName, optionValue))
                       (string "\n" <|> string "\r\n")
   --Debug.traceShow options (return "")
-  return (action, url)
+  return (action, url, options)
 
 
 
