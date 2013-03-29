@@ -1,4 +1,11 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, FlexibleContexts #-}
+import qualified Data.Either as Either
+import qualified Data.Map as Map
+import qualified Data.Time as Time
+import qualified System.Locale as Locale
+import qualified Data.ConfigFile as CF
+import qualified Control.Monad.Error as Error
+
 import qualified System.IO as IO
 import qualified Network as N
 {-import qualified GHC.IO.Handle-}
@@ -45,10 +52,19 @@ main = N.withSocketsDo $ do
   -- installHandler sigINT (Catch (throwTo tid UserInterrupt)) Nothing
   -- installHandler sigTERM (Catch (throwTo tid UserInterrupt)) Nothing
   -- installHandler sigINT Ignore Nothing -- ignore Ctrl-C
+  eitherPort <- Error.runErrorT $
+    do
+      cp <- join $ Error.liftIO $ CF.readfile CF.emptyCP "conf.ini"
+      p <- (CF.get cp "Server" "port") :: Error.MonadError CF.CPError m => m Int
+      Error.liftIO $ putStrLn (show p)
+      return p
 
-  putStrLn $ "Started listening on port " ++ show port
-  sock <- N.listenOn (N.PortNumber port)
-  acceptConnections sock
+  case eitherPort of
+    Either.Left err -> error "Failed parsing conf.ini"
+    Either.Right port -> do
+      putStrLn $ "Started listening on port " ++ show port
+      sock <- N.listenOn (N.PortNumber (fromIntegral port))
+      acceptConnections sock
   -- forever $ do 
   --   (handle, hostname, portnumber) <- N.accept sock
   --   putStrLn $ "Got connection from " ++ hostname ++ ":" ++ show portnumber
