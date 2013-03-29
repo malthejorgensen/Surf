@@ -188,7 +188,7 @@ httpResponse statusCode headers content = do
   cTime <- Time.getCurrentTime
   let Just msg = Map.lookup statusCode statusMsgs
   let date_header = ("Date", C.pack$Time.formatTime Locale.defaultTimeLocale "%a, %e %b %Y %T %Z" cTime)
-  let header_lines = map (\(a,b) -> a `C.append` ": " `C.append` b) (date_header:headers)
+  let header_lines = map (\(a,b) -> a `C.append` ": " `C.append` b `C.append` "\r") (date_header:headers)
   let headers_str = C.unlines header_lines
   -- "Date: Fri, 31 Dec 1999 23:59:59 GMT",
   return $ C.concat [
@@ -196,9 +196,9 @@ httpResponse statusCode headers content = do
       (C.pack.show) statusCode,
       " ",
       msg,
-      "\n",
+      "\r\n",
       headers_str,
-      "\n",
+      "\r\n",
       content
     ]
 
