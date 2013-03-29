@@ -163,30 +163,43 @@ goodRequest handle (action, url) = do
       -- hFileSize is slow?
       -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
 
-      C.hPutStr handle $ C.unlines ["HTTP/1.0 200 OK",
-                                  "Date: Fri, 31 Dec 1999 23:59:59 GMT",
-                                  "Content-Type: text/html",
-                                  C.append "Content-Length: " (C.pack$show$filesize),
-                                  ""]
+      header <- httpResponse 200 $ C.unlines ["Content-Type: text/html", C.append "Content-Length: " (C.pack$show$filesize), ""]
+      C.hPutStr handle header
       (C.hPutStr handle =<< C.hGetContents file)
       -- C.hPutStr handle $ readFile $ tail url
       )
      else notFound handle
 
 badRequest handle = do
-  C.hPutStr handle $ C.unlines ["HTTP/1.0 400 Bad Request",
-                                "Date: Fri, 31 Dec 1999 23:59:59 GMT",
-                                ""]
+  httpResponse 400 "400 Bad Request" >>= C.hPutStr handle
+
 notFound handle = do
-  C.hPutStr handle $ C.unlines ["HTTP/1.0 404 Not Found",
-                                "Date: Fri, 31 Dec 1999 23:59:59 GMT",
-                                ""]
+  httpResponse 404 "404 Not Found" >>= C.hPutStr handle
                                 -- "Content-Type: text/html",
                                 -- C.append "Content-Length: " (C.pack$show$filesize),
                                 -- ""]
 
   -- N.sClose sock
 
+statusMsgs = Map.fromList [ (200, "OK"), (400, "Bad Request"), (404, "Not Found") ]
+
+httpResponse :: Int -> C.ByteString -> IO C.ByteString
+httpResponse statusCode content = do
+  cTime <- Time.getCurrentTime
+  let Just msg = Map.lookup statusCode statusMsgs
+  let time = Time.formatTime Locale.defaultTimeLocale "Date: %a, %e %b %Y %T %Z" cTime
+  -- "Date: Fri, 31 Dec 1999 23:59:59 GMT",
+  return $ C.concat [
+      "HTTP/1.0 ",
+      (C.pack.show) statusCode,
+      " ",
+      msg,
+      "\n",
+      C.pack time,
+      "\n",
+      "\n",
+      content
+    ]
 
 -- httpRequestParser :: Parser BS.ByteString
 httpRequestParser = do
