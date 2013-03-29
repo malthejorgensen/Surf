@@ -163,7 +163,7 @@ goodRequest handle (action, url) = do
       -- hFileSize is slow?
       -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
 
-      header <- httpResponse 200 $ C.unlines ["Content-Type: text/html", C.append "Content-Length: " (C.pack$show$filesize), ""]
+      header <- httpResponse 200 [("Content-Type", "text/html"), ("Content-Length", (C.pack$show$filesize))] ""
       C.hPutStr handle header
       (C.hPutStr handle =<< C.hGetContents file)
       -- C.hPutStr handle $ readFile $ tail url
@@ -171,10 +171,10 @@ goodRequest handle (action, url) = do
      else notFound handle
 
 badRequest handle = do
-  httpResponse 400 "400 Bad Request" >>= C.hPutStr handle
+  httpResponse 400 [] "400 Bad Request" >>= C.hPutStr handle
 
 notFound handle = do
-  httpResponse 404 "404 Not Found" >>= C.hPutStr handle
+  httpResponse 404 [] "404 Not Found" >>= C.hPutStr handle
                                 -- "Content-Type: text/html",
                                 -- C.append "Content-Length: " (C.pack$show$filesize),
                                 -- ""]
@@ -183,11 +183,13 @@ notFound handle = do
 
 statusMsgs = Map.fromList [ (200, "OK"), (400, "Bad Request"), (404, "Not Found") ]
 
-httpResponse :: Int -> C.ByteString -> IO C.ByteString
-httpResponse statusCode content = do
+httpResponse :: Int -> [(C.ByteString, C.ByteString)] -> C.ByteString -> IO C.ByteString
+httpResponse statusCode headers content = do
   cTime <- Time.getCurrentTime
   let Just msg = Map.lookup statusCode statusMsgs
-  let time = Time.formatTime Locale.defaultTimeLocale "Date: %a, %e %b %Y %T %Z" cTime
+  let date_header = ("Date", C.pack$Time.formatTime Locale.defaultTimeLocale "%a, %e %b %Y %T %Z" cTime)
+  let header_lines = map (\(a,b) -> a `C.append` ": " `C.append` b) (date_header:headers)
+  let headers_str = C.unlines header_lines
   -- "Date: Fri, 31 Dec 1999 23:59:59 GMT",
   return $ C.concat [
       "HTTP/1.0 ",
@@ -195,8 +197,7 @@ httpResponse statusCode content = do
       " ",
       msg,
       "\n",
-      C.pack time,
-      "\n",
+      headers_str,
       "\n",
       content
     ]
