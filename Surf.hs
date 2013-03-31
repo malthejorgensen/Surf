@@ -176,7 +176,8 @@ goodRequest handle (action, url, headers) settings = do
       -- hFileSize is slow?
       -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
 
-      header <- httpResponse 200 [("Content-Type", "text/html"), ("Content-Length", (C.pack$show$filesize))] ""
+      -- header <- httpResponse 200 [("Content-Type", "text/html"), ("Content-Length", (C.pack$show$filesize))] ""
+      header <- httpResponse 200 [("Content-Length", (C.pack$show$filesize))] ""
       C.hPutStr handle header
       (C.hPutStr handle =<< C.hGetContents file)
       -- C.hPutStr handle $ readFile $ tail url
