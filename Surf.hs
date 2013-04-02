@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings, FlexibleContexts #-}
 import qualified Data.Either as Either
+import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Time as Time
 import qualified System.Locale as Locale
@@ -18,14 +19,22 @@ import Data.Attoparsec.ByteString.Char8 as AP
 import Control.Applicative -- for <|>
 import Control.Monad -- for mzero
 
-import qualified System.Directory as Folder -- for doesFileExist
+import qualified System.Directory as Directory -- for doesFileExist
+import qualified System.FilePath as FilePath -- for doesFileExist
+import System.FilePath ((</>))
 
 import qualified Control.Exception as E
 import qualified Control.Concurrent as Con
 import qualified System.Posix.Signals
 import qualified Debug.Trace as Debug
 
-data Settings = Settings { port :: N.PortNumber, domainRoot :: C.ByteString }
+data Settings = Settings {
+  port :: N.PortNumber,
+  domainRoot :: FilePath.FilePath,
+  mediateSwitch :: Bool,
+  mediateHost :: String,
+  mediatePort :: N.PortNumber
+}
 
 testString :: C.ByteString
 testString = "Let the sky fall"
@@ -48,18 +57,37 @@ debugGetLine handle = C.hGetLine handle
 -- `withSocketsDo` is for portability with Windows (not really required)
 main = N.withSocketsDo $ do
   tid <- Con.myThreadId
+
   -- installHandler keyboardSignal (Catch (throwTo tid UserInterrupt)) Nothing
   -- installHandler sigINT (Catch (throwTo tid UserInterrupt)) Nothing
   -- installHandler sigTERM (Catch (throwTo tid UserInterrupt)) Nothing
   -- installHandler sigINT Ignore Nothing -- ignore Ctrl-C
+  --
+  -- val <- readfile emptyCP "conf.ini"
+  -- let cp = forceEither val
+  -- putStrLn "Your setting is:"
+  -- putStrLn $ forceEither $ get cp "Server" "port"
   eitherSettings <- Error.runErrorT $
     do
       cp <- join $ Error.liftIO $ CF.readfile CF.emptyCP "conf.ini"
+      -- Server settings
       p <- (CF.get cp "Server" "port") :: Error.MonadError CF.CPError m => m Int
       d <- (CF.get cp "Server" "domain-root")
+
+      -- Mediate settings
+      m_o <- (CF.get cp "Mediate" "mediate")
+      m_h <- (CF.get cp "Mediate" "hostname")
+      m_p <- (CF.get cp "Mediate" "port") :: Error.MonadError CF.CPError m => m Int
+      -- if m_h == "127.0.0.1" && (p == m_p) then (CF.OtherProblem "Cannot mediate to self", "Cannot mediate to self" ) else (CF.OtherProblem "Cannot mediate to self", "Cannot mediate to self")
+      if m_h == "127.0.0.1" && (p == m_p) then Error.throwError (CF.OtherProblem "Cannot mediate to self", "Cannot mediate to self") else return "LOL"
       Error.liftIO $ putStrLn (show p)
       Error.liftIO $ putStrLn d
-      return Settings { port = (fromIntegral p), domainRoot = (C.pack d) }
+      d2 <- Error.liftIO $ Directory.canonicalizePath d
+      return Settings { port = (fromIntegral p),
+                        domainRoot = d2,
+                        mediateSwitch = m_o,
+                        mediateHost = m_h,
+                        mediatePort = (fromIntegral m_p) }
 
   case eitherSettings of
     Either.Left err -> error $ "Failed parsing conf.ini: " ++ show err
@@ -89,9 +117,6 @@ acceptConnections sock settings = do
   acceptConnections sock settings
 
 
-mediateSwitch = False
-local_hostname = "127.0.0.1"
-local_port = 9000
 
 takeWhile' :: (t -> Bool) -> [IO t] -> IO [t]
 takeWhile' test (a:as) = do
@@ -102,19 +127,17 @@ takeWhile' test (a:as) = do
     else do return []
 
 mediate' = mediate IO.stdin
-mediate handle = do
+mediate handle settings request = do
 
 
     -- Establish a socket for communication
-    mediate_handle <- N.connectTo local_hostname (N.PortNumber local_port)
+    mediate_handle <- N.connectTo (mediateHost settings) (N.PortNumber (mediatePort settings))
     IO.hSetBuffering mediate_handle IO.NoBuffering
     -- IO.hSetBuffering mediate_handle IO.LineBuffering
 
     -- Send request
     print "Sending browser request"
-    req_line_actions <- return $ repeat $ debugGetLine handle
-    req_lines <- takeWhile' (/="\r") $ req_line_actions
-    C.hPutStr mediate_handle $ C.unlines $ req_lines ++ ["\r"]
+    C.hPutStr mediate_handle request
 
     -- Get answer
     print "Fetching server answer"
@@ -131,9 +154,24 @@ mediate handle = do
 
 
 acceptConn handle settings = do
+  -- Make a list actions that fetch one line each
+  request_line_actions <- return $ repeat $ debugGetLine handle
+  -- Take lines until we reach an empty line
+  request_lines <- takeWhile' (\l-> l /= "\r" && l /= "") $ request_line_actions
+  -- Set line delimiter
+  let end = if last (C.unpack$head request_lines) == '\r' then "\r" else ""
 
-  if mediateSwitch
-    then mediate handle
+  -- Check if more input
+  more_input <- IO.hWaitForInput handle 1
+  request_lines2 <- if more_input
+    then takeWhile' (\l-> l /= "\r" && l /= "") $ request_line_actions
+    else return []
+
+  -- Reconstruct request
+  let request = C.concat $ map (\l -> C.concat [l, "\n"]) $ request_lines ++ [end]
+
+  if mediateSwitch settings
+    then mediate handle settings request
     else do
       -- initiate the parser with at least one line of input
       -- text <- debugGetLine handle
@@ -142,60 +180,105 @@ acceptConn handle settings = do
       -- IO.withFile "http.log" IO.AppendMode (\file -> do
       --     C.hPutStr file unparsed_text
       --     )
-      request_line_actions <- return $ repeat $ debugGetLine handle
-      request_lines <- takeWhile' (\c-> c/="\r" && c/="") $ request_line_actions
-      let end = if last (C.unpack$head request_lines) == '\r' then "\r" else ""
-      let request = C.concat $ map (\l -> C.concat [l, "\n"]) $ request_lines ++ [end]
+      -- Write request to log
       IO.withFile "http.log" IO.AppendMode (\file -> do
           C.hPutStrLn file request
           )
+      -- Parse request
       _ <- case parse httpRequestParser request of
              Fail unparsed_text l_str str     -> badRequest handle
              Partial f                        -> badRequest handle
              Done unparsed_text (action, url, headers) -> goodRequest handle (action, url, headers) settings
-      IO.hClose handle
+      return ()
+
+removePortPart host = C.takeWhile (/= ':') host
+removeWWWPart host = if C.length host > 4 && C.take 4 host == "www." then C.drop 4 host
+                     else host
+
+jsonRequest handle (action, url, headers) settings = do
+  let json_url = case Map.lookup "JSON-URL" (Map.fromList headers) of
+                   Just some_url -> some_url
+                   Nothing -> ""
+  return ()
 
 goodRequest handle (action, url, headers) settings = do
-  let base_filepath = if url == "/" then "index.html" else C.tail url
-  -- Get "Host" header
-  let host = case Map.lookup "Host" (Map.fromList headers) of
-               -- Remove any port part
-               Just hostWithPort -> C.takeWhile (/= ':') hostWithPort
-               Nothing -> ""
-  -- Print "Host: ..."
-  C.putStrLn $ C.append "Host: " host
+  if (C.takeWhile (/= '?') url) == "/json"
+    then jsonRequest handle (action, url, headers) settings
+    else do
+      let base_filepath = if url == "/" then "." else C.dropWhile (== '/') url
+      -- Get "Host" header
+      let host = case Map.lookup "Host" (Map.fromList headers) of
+                   -- Remove any port part
+                   Just hostWithPort -> (removeWWWPart.removePortPart) hostWithPort
+                   Nothing -> ""
+      -- Print "Host: ..."
+      C.putStrLn $ C.append "Host: " host
 
-  let filepath = C.concat [(domainRoot settings), host, "/", base_filepath]
+      let filepath_req = (domainRoot settings) </> C.unpack host </> C.unpack base_filepath
+      --
+      -- Check if legal path (no '..')
+      let isValidPath = not $ ".." `elem` (FilePath.splitDirectories filepath_req)
 
-  C.putStrLn $ C.append "Grabbing file: " filepath
+      if not isValidPath then notFound handle else do
 
-  fExists <- Folder.doesFileExist (C.unpack filepath)
-  if fExists
-    then IO.withFile (C.unpack filepath) IO.ReadMode (\file -> do
-      filesize <- IO.hFileSize file
-      -- hFileSize is slow?
-      -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
+        -- Check if legal path (inside domainRoot)
+        -- filepath_req <- Directory.canonicalizePath $ (domainRoot settings) </> C.unpack host </> C.unpack base_filepath
+        -- let isValidPath = (domainRoot settings) `List.isPrefixOf` filepath_req
 
-      -- header <- httpResponse 200 [("Content-Type", "text/html"), ("Content-Length", (C.pack$show$filesize))] ""
-      header <- httpResponse 200 [("Content-Length", (C.pack$show$filesize))] ""
-      C.hPutStr handle header
-      (C.hPutStr handle =<< C.hGetContents file)
-      -- C.hPutStr handle $ readFile $ tail url
-      )
-     else notFound handle
+        C.putStrLn $ C.append "Grabbing file: " (C.pack filepath_req)
+
+        -- check if directory
+        isDir <- Directory.doesDirectoryExist filepath_req
+        let filepath = if isDir
+                          then filepath_req </> "index.html"
+                          else filepath_req
+
+        -- check if file exists
+        fExists <- Directory.doesFileExist filepath
+        if fExists
+          then IO.withFile filepath IO.ReadMode (\file -> do
+            filesize <- IO.hFileSize file
+            -- hFileSize is slow?
+            -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
+
+            -- check extension and add Content-Type header
+            -- let ext = reverse $ List.takeWhile (/= '.') $ reverse filepath
+            let ext = dropWhile (=='.') $ FilePath.takeExtension filepath
+            let headers = case Map.lookup ext mimeTypes of
+                            Just mimeType -> [("Content-Type", mimeType)]
+                            Nothing -> []
+
+            -- header <- httpResponse 200 [("Content-Type", "text/html"), ("Content-Length", (C.pack$show$filesize))] ""
+            header <- httpResponse 200 (headers++[("Content-Length", (C.pack$show$filesize))]) ""
+            C.hPutStr handle header
+            (C.hPutStr handle =<< C.hGetContents file)
+            -- C.hPutStr handle $ readFile $ tail url
+            )
+           else notFound handle
 
 badRequest handle = do
+  print "worked2"
   httpResponse 400 [] "400 Bad Request" >>= C.hPutStr handle
 
 notFound handle = do
+  print "worked3"
   httpResponse 404 [] "404 Not Found" >>= C.hPutStr handle
                                 -- "Content-Type: text/html",
                                 -- C.append "Content-Length: " (C.pack$show$filesize),
                                 -- ""]
 
   -- N.sClose sock
-
 statusMsgs = Map.fromList [ (200, "OK"), (400, "Bad Request"), (404, "Not Found") ]
+
+-- http://www.iana.org/assignments/media-types
+mimeTypes = Map.fromList [
+              ("html", "text/html"),
+              ("css", "text/css"),
+              ("js", "application/javascript"),
+              ("jpg", "image/jpeg"),
+              ("png", "image/png"),
+              ("svg", "image/svg+xml")
+            ]
 
 httpResponse :: Int -> [(C.ByteString, C.ByteString)] -> C.ByteString -> IO C.ByteString
 httpResponse statusCode headers content = do
