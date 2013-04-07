@@ -229,32 +229,34 @@ goodRequest handle (action, url, headers) settings = do
 
     -- check if directory
     isDir <- Directory.doesDirectoryExist filepath_req
-    let filepath = if isDir
-                      then filepath_req </> "index.html"
-                      else filepath_req
+    if isDir && base_filepath /= "." && C.last base_filepath /= '/' then permanentlyMoved handle (C.append base_filepath "/")
+      else do
+        let filepath = if isDir
+                          then filepath_req </> "index.html"
+                          else filepath_req
 
-    -- check if file exists
-    fExists <- Directory.doesFileExist filepath
-    if fExists
-      then IO.withFile filepath IO.ReadMode (\file -> do
-        filesize <- IO.hFileSize file
-        -- hFileSize is slow?
-        -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
+        -- check if file exists
+        fExists <- Directory.doesFileExist filepath
+        if fExists
+          then IO.withFile filepath IO.ReadMode (\file -> do
+            filesize <- IO.hFileSize file
+            -- hFileSize is slow?
+            -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
 
-        -- check extension and add Content-Type header
-        -- let ext = reverse $ List.takeWhile (/= '.') $ reverse filepath
-        let ext = dropWhile (=='.') $ FilePath.takeExtension filepath
-        let headers = case Map.lookup ext mimeTypes of
-                        Just mimeType -> [("Content-Type", mimeType)]
-                        Nothing -> []
+            -- check extension and add Content-Type header
+            -- let ext = reverse $ List.takeWhile (/= '.') $ reverse filepath
+            let ext = dropWhile (=='.') $ FilePath.takeExtension filepath
+            let headers = case Map.lookup ext mimeTypes of
+                            Just mimeType -> [("Content-Type", mimeType)]
+                            Nothing -> []
 
-        -- header <- httpResponse 200 [("Content-Type", "text/html"), ("Content-Length", (C.pack$show$filesize))] ""
-        header <- httpResponse 200 (headers++[("Content-Length", (C.pack$show$filesize))]) ""
-        C.hPutStr handle header
-        (C.hPutStr handle =<< C.hGetContents file)
-        -- C.hPutStr handle $ readFile $ tail url
-        )
-       else notFound handle
+            -- header <- httpResponse 200 [("Content-Type", "text/html"), ("Content-Length", (C.pack$show$filesize))] ""
+            header <- httpResponse 200 (headers++[("Content-Length", (C.pack$show$filesize))]) ""
+            C.hPutStr handle header
+            (C.hPutStr handle =<< C.hGetContents file)
+            -- C.hPutStr handle $ readFile $ tail url
+            )
+           else notFound handle
 
 badRequest handle = do
   print "worked2"
@@ -267,8 +269,13 @@ notFound handle = do
                                 -- C.append "Content-Length: " (C.pack$show$filesize),
                                 -- ""]
 
+permanentlyMoved handle location = do
+  httpResponse 301 [ ("Location", location) ] "" >>= C.hPutStr handle
+
+
   -- N.sClose sock
-statusMsgs = Map.fromList [ (200, "OK"), (400, "Bad Request"), (404, "Not Found") ]
+statusMsgs = Map.fromList [ (200, "OK"), (400, "Bad Request"), (404, "Not Found"),
+                            (301, "Moved Permanently") ]
 
 -- http://www.iana.org/assignments/media-types
 mimeTypes = Map.fromList [
