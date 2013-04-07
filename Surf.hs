@@ -118,10 +118,10 @@ acceptConnections sock settings = do
 
 
 
-takeWhile' :: (IO Bool) -> [IO t] -> IO [t]
+takeWhile' :: (t -> IO Bool) -> [IO t] -> IO [t]
 takeWhile' test (a:as) = do
   x <- a
-  continue <- test
+  continue <- test x
   if continue
     then do xs <- (takeWhile' test as)
             return (x:xs)
@@ -151,7 +151,7 @@ mediate handle host port request = do
     -- Make a list of actions that fetch one line each
     request_line_actions <- return $ repeat $ debugGetLine mediate_handle
     -- Take lines until we wait more than 1 millisecond for more input
-    request_lines <- takeWhile' (IO.hWaitForInput mediate_handle 1) $ request_line_actions
+    request_lines <- takeWhile' (\x -> IO.hWaitForInput mediate_handle 1) $ request_line_actions
     -- Set line delimiter
     let end = if last (C.unpack$head request_lines) == '\r' then "\r" else ""
     -- Reconstruct request
@@ -165,7 +165,9 @@ acceptConn handle settings = do
   -- Make a list of actions that fetch one line each
   request_line_actions <- return $ repeat $ debugGetLine handle
   -- Take lines until we wait more than 1 millisecond for more input
-  request_lines <- takeWhile' (IO.hWaitForInput handle 1) $ request_line_actions
+  -- request_lines <- takeWhile' (IO.hWaitForInput handle 1) $ request_line_actions
+  -- request_lines <- takeWhile' (\x -> IO.hWaitForInput handle 1) $ request_line_actions
+  request_lines <- takeWhile' (\x -> return (x /= "\r" && x /= "")) $ request_line_actions
   -- Set line delimiter
   let end = if last (C.unpack$head request_lines) == '\r' then "\r" else ""
   -- Reconstruct request
