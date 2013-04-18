@@ -102,8 +102,9 @@ main = N.withSocketsDo $ do
   case eitherSettings of
     Either.Left err -> error $ "Failed parsing conf.ini: " ++ show err
     Either.Right settings -> do
-      putStrLn $ "Started listening on port " ++ show (port settings)
+      -- Listen on port
       sock <- N.listenOn (N.PortNumber (port settings))
+      putStrLn $ "Started listening on port " ++ show (port settings)
       -- Change user (if you wanna use port 80, you need to `sudo`, but you
       --              don't want root priviledges on your web process so we drop
       --              to another user)
