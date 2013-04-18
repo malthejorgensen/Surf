@@ -113,7 +113,7 @@ acceptConnections sock settings = do
   putStrLn "trying to accept" -- debug msg
   conn@(handle,host,port) <- N.accept sock
   print conn -- debug msg
-  Con.forkIO $ catch (acceptConn handle settings `E.finally` IO.hClose handle) (\e -> print e)
+  Con.forkIO $ E.catch (acceptConn handle settings `E.finally` IO.hClose handle) (\e -> print (e :: E.SomeException))
   acceptConnections sock settings
 
 
