@@ -6,8 +6,10 @@ import qualified Data.Time as Time
 import qualified System.Locale as Locale
 import qualified Data.ConfigFile as CF
 import qualified Control.Monad.Error as Error
+import Data.Maybe
 
 import qualified System.IO as IO
+import qualified System.Posix.User as PosixUser
 import qualified Network as N
 {-import qualified GHC.IO.Handle-}
 
@@ -31,6 +33,7 @@ import qualified Debug.Trace as Debug
 data Settings = Settings {
   port :: N.PortNumber,
   domainRoot :: FilePath.FilePath,
+  user :: Maybe String,
   mediateSwitch :: Bool,
   mediateHost :: String,
   mediatePort :: N.PortNumber
@@ -74,6 +77,12 @@ main = N.withSocketsDo $ do
       p <- (CF.get cp "Server" "port") :: Error.MonadError CF.CPError m => m Int
       d <- (CF.get cp "Server" "domain-root")
 
+      u <- if CF.has_option cp "Server" "user"
+             then (CF.get cp "Server" "user")
+             else return ""
+      let u_m = if u == ""
+                  then Nothing
+                  else Just u
       -- Mediate settings
       m_o <- (CF.get cp "Mediate" "mediate")
       m_h <- (CF.get cp "Mediate" "hostname")
@@ -85,6 +94,7 @@ main = N.withSocketsDo $ do
       d2 <- Error.liftIO $ Directory.canonicalizePath d
       return Settings { port = (fromIntegral p),
                         domainRoot = d2,
+                        user = u_m,
                         mediateSwitch = m_o,
                         mediateHost = m_h,
                         mediatePort = (fromIntegral m_p) }
@@ -94,6 +104,15 @@ main = N.withSocketsDo $ do
     Either.Right settings -> do
       putStrLn $ "Started listening on port " ++ show (port settings)
       sock <- N.listenOn (N.PortNumber (port settings))
+      -- Change user (if you wanna use port 80, you need to `sudo`, but you
+      --              don't want root priviledges on your web process so we drop
+      --              to another user)
+      case (user settings) of
+        Just username -> do
+             user_entry <- PosixUser.getUserEntryForName (fromJust $ user settings)
+             PosixUser.setUserID (PosixUser.userID user_entry)
+             putStrLn $ "Switched to user: " ++ (PosixUser.userName user_entry)
+        Nothing -> return ()
       acceptConnections sock settings
   -- forever $ do 
   --   (handle, hostname, portnumber) <- N.accept sock
