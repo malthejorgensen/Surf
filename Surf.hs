@@ -15,6 +15,7 @@ import qualified Network as N
 
 import qualified Data.ByteString as BS hiding (putStrLn, hPutStrLn) -- for hGetContents
 import qualified Data.ByteString.Char8 as C -- for pack
+import qualified Text.Regex.PCRE.Light as Regex
 -- import qualified Data.Word as W -- for pack
 
 import Data.Attoparsec.ByteString.Char8 as AP
@@ -226,6 +227,13 @@ jsonRequest handle (action, url, headers) settings request = do
                    Nothing -> return ()
   return ()
 
+
+parseRange range_str = case Regex.match r range_str [] of
+  Just matches -> Debug.traceShow matches (read $ C.unpack $ matches !! 1) :: Integer
+  Nothing -> 0
+  where
+    r = Regex.compile (C.pack "bytes=(\\d+)-(\\d+)?") []
+
 goodRequest handle (action, url, headers) settings = do
   let base_filepath = if url == "/" then "." else C.dropWhile (== '/') url
   -- Get "Host" header
@@ -265,6 +273,15 @@ goodRequest handle (action, url, headers) settings = do
             -- hFileSize is slow?
             -- http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell
 
+
+            let range = case Map.lookup "Range" (Map.fromList headers) of
+                          Just range_str -> Debug.trace "Got range" $ parseRange range_str
+                          Nothing -> Debug.trace "Didn't get range" 0
+
+            let range_header = if range == 0
+                                 then []
+                                 else [("Content-Range", C.pack $ "bytes " ++ show range ++ "-" ++ show (filesize-1) ++ "/" ++ show filesize)]
+
             -- check extension and add Content-Type header
             -- let ext = reverse $ List.takeWhile (/= '.') $ reverse filepath
             let ext = dropWhile (=='.') $ FilePath.takeExtension filepath
@@ -273,12 +290,16 @@ goodRequest handle (action, url, headers) settings = do
                             Nothing -> []
 
             -- header <- httpResponse 200 [("Content-Type", "text/html"), ("Content-Length", (C.pack$show$filesize))] ""
-            header <- httpResponse 200 (headers++[("Content-Length", (C.pack$show$filesize))]) ""
+            header <- httpResponse 200 (headers ++ range_header ++ [("Content-Length", (C.pack$show$(filesize - range)))] ++ [("Accept-Range", "bytes")]) ""
+
+            -- Put header
             C.hPutStr handle header
+            -- Put contents
+            IO.hSeek file IO.AbsoluteSeek range
             (C.hPutStr handle =<< C.hGetContents file)
             -- C.hPutStr handle $ readFile $ tail url
             )
-           else notFound handle
+          else notFound handle
 
 badRequest handle = do
   print "worked2"
@@ -319,7 +340,7 @@ httpResponse statusCode headers content = do
   let headers_str = C.unlines header_lines
   -- "Date: Fri, 31 Dec 1999 23:59:59 GMT",
   return $ C.concat [
-      "HTTP/1.0 ",
+      "HTTP/1.1 ",
       (C.pack.show) statusCode,
       " ",
       msg,
