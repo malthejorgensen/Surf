@@ -48,7 +48,9 @@ Executable Surf
    Main-is: Surf.hs
   
   -- Packages needed in order to build this package.
-   Build-depends: base, attoparsec, bytestring, network, unix
+   Build-depends: base, attoparsec, bytestring, network, unix, filepath,
+                  directory, pcre-light, mtl, parsec, containers, MissingH,
+                  old-locale, time
   
   -- Modules not exported by this package.
   -- Other-modules:       
